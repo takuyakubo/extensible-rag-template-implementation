@@ -1,5 +1,6 @@
 version: '3.8'
 
+# 開発環境用に簡略化したDocker Compose設定
 services:
   # フロントエンド
   frontend:
@@ -13,11 +14,10 @@ services:
       - "3000:3000"
     environment:
       - NODE_ENV=development
-    depends_on:
-      - api-gateway
+      - NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
 
-  # APIゲートウェイ
-  api-gateway:
+  # APIゲートウェイとバックエンドサービスを統合したテストサーバー
+  backend:
     build:
       context: ./backend/api-gateway
       dockerfile: Dockerfile.dev
@@ -27,146 +27,15 @@ services:
       - "8000:8000"
     environment:
       - PYTHONUNBUFFERED=1
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/rag_db
+      - DEBUG=true
+      - AUTH_SERVICE_URL=http://backend:8001  # 同じコンテナでサービスを模倂
+      - USER_SERVICE_URL=http://backend:8001
+      - DOC_SERVICE_URL=http://backend:8001
+      - RAG_SERVICE_URL=http://backend:8001
+      - LLM_SERVICE_URL=http://backend:8001
       - REDIS_URL=redis://redis:6379/0
-      - AUTH_SERVICE_URL=http://auth-service:8001
-      - USER_SERVICE_URL=http://user-service:8002
-      - DOC_SERVICE_URL=http://doc-service:8003
-      - RAG_SERVICE_URL=http://rag-service:8004
-      - LLM_SERVICE_URL=http://llm-service:8005
-    depends_on:
-      - db
-      - redis
-
-  # 認証サービス
-  auth-service:
-    build:
-      context: ./backend/auth-service
-      dockerfile: Dockerfile.dev
-    volumes:
-      - ./backend/auth-service:/app
-    ports:
-      - "8001:8001"
-    environment:
-      - PYTHONUNBUFFERED=1
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/rag_db
-      - REDIS_URL=redis://redis:6379/1
-      - JWT_SECRET=your_development_jwt_secret
-    depends_on:
-      - db
-      - redis
-
-  # ユーザー管理サービス
-  user-service:
-    build:
-      context: ./backend/user-service
-      dockerfile: Dockerfile.dev
-    volumes:
-      - ./backend/user-service:/app
-    ports:
-      - "8002:8002"
-    environment:
-      - PYTHONUNBUFFERED=1
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/rag_db
-    depends_on:
-      - db
-
-  # ドキュメント管理サービス
-  doc-service:
-    build:
-      context: ./backend/doc-service
-      dockerfile: Dockerfile.dev
-    volumes:
-      - ./backend/doc-service:/app
-    ports:
-      - "8003:8003"
-    environment:
-      - PYTHONUNBUFFERED=1
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/rag_db
-      - REDIS_URL=redis://redis:6379/2
-      - CELERY_BROKER_URL=redis://redis:6379/3
-      - S3_ENDPOINT=http://minio:9000
-      - S3_ACCESS_KEY=minioadmin
-      - S3_SECRET_KEY=minioadmin
-      - S3_BUCKET=rag-documents
-      - ELASTICSEARCH_URL=http://elasticsearch:9200
-    depends_on:
-      - db
-      - redis
-      - minio
-      - elasticsearch
-
-  # RAGエンジンサービス
-  rag-service:
-    build:
-      context: ./backend/rag-service
-      dockerfile: Dockerfile.dev
-    volumes:
-      - ./backend/rag-service:/app
-    ports:
-      - "8004:8004"
-    environment:
-      - PYTHONUNBUFFERED=1
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/rag_db
-      - REDIS_URL=redis://redis:6379/4
-      - ELASTICSEARCH_URL=http://elasticsearch:9200
-      - LLM_SERVICE_URL=http://llm-service:8005
-    depends_on:
-      - db
-      - redis
-      - elasticsearch
-      - llm-service
-
-  # LLMサービス
-  llm-service:
-    build:
-      context: ./backend/llm-service
-      dockerfile: Dockerfile.dev
-    volumes:
-      - ./backend/llm-service:/app
-    ports:
-      - "8005:8005"
-    environment:
-      - PYTHONUNBUFFERED=1
-      - REDIS_URL=redis://redis:6379/5
-      - OPENAI_API_KEY=your_development_openai_key
-      - ANTHROPIC_API_KEY=your_development_anthropic_key
     depends_on:
       - redis
-
-  # ドキュメント処理ワーカー
-  doc-worker:
-    build:
-      context: ./backend/doc-service
-      dockerfile: Dockerfile.worker
-    volumes:
-      - ./backend/doc-service:/app
-    environment:
-      - PYTHONUNBUFFERED=1
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/rag_db
-      - REDIS_URL=redis://redis:6379/2
-      - CELERY_BROKER_URL=redis://redis:6379/3
-      - S3_ENDPOINT=http://minio:9000
-      - S3_ACCESS_KEY=minioadmin
-      - S3_SECRET_KEY=minioadmin
-      - S3_BUCKET=rag-documents
-      - ELASTICSEARCH_URL=http://elasticsearch:9200
-    depends_on:
-      - redis
-      - minio
-      - elasticsearch
-
-  # PostgreSQLデータベース
-  db:
-    image: postgres:15
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-    environment:
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_USER=postgres
-      - POSTGRES_DB=rag_db
 
   # Redis
   redis:
@@ -176,46 +45,5 @@ services:
     volumes:
       - redis_data:/data
 
-  # Elasticsearch
-  elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.10.4
-    ports:
-      - "9200:9200"
-    environment:
-      - discovery.type=single-node
-      - xpack.security.enabled=false
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
-    volumes:
-      - elasticsearch_data:/usr/share/elasticsearch/data
-
-  # MinIO (S3互換ストレージ)
-  minio:
-    image: minio/minio
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    environment:
-      - MINIO_ROOT_USER=minioadmin
-      - MINIO_ROOT_PASSWORD=minioadmin
-    volumes:
-      - minio_data:/data
-    command: server /data --console-address ":9001"
-
-  # MinIOセットアップ（バケット作成）
-  minio-setup:
-    image: minio/mc
-    depends_on:
-      - minio
-    entrypoint: >
-      /bin/sh -c '
-      sleep 5;
-      /usr/bin/mc config host add myminio http://minio:9000 minioadmin minioadmin;
-      /usr/bin/mc mb myminio/rag-documents;
-      exit 0;
-      '
-
 volumes:
-  postgres_data:
   redis_data:
-  elasticsearch_data:
-  minio_data:
