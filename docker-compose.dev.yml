@@ -1,0 +1,135 @@
+version: '3.8'
+
+services:
+  # フロントエンド開発サーバー
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+
+  # APIゲートウェイ
+  api-gateway:
+    build:
+      context: ./backend/api-gateway
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./backend/api-gateway:/app
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DEBUG=true
+      - AUTH_SERVICE_URL=http://auth-service:8001
+      - USER_SERVICE_URL=http://user-service:8002
+      - DOC_SERVICE_URL=http://doc-service:8003
+      - RAG_SERVICE_URL=http://rag-service:8004
+      - LLM_SERVICE_URL=http://llm-service:8005
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+      - auth-service
+
+  # 認証サービス
+  auth-service:
+    build:
+      context: ./backend/auth-service
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./backend/auth-service:/app
+    ports:
+      - "8001:8001"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DEBUG=true
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/rag_db
+      - REDIS_URL=redis://redis:6379/1
+      - SECRET_KEY=development_jwt_secret_key
+    depends_on:
+      - db
+      - redis
+
+  # RAGエンジン
+  rag-service:
+    build:
+      context: ./backend/rag-service
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./backend/rag-service:/app
+    ports:
+      - "8004:8004"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DEBUG=true
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/rag_db
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - LLM_SERVICE_URL=http://llm-service:8005
+      - REDIS_URL=redis://redis:6379/4
+      - SECRET_KEY=development_jwt_secret_key
+    depends_on:
+      - db
+      - redis
+      - elasticsearch
+      - llm-service
+
+  # LLMサービス
+  llm-service:
+    build:
+      context: ./backend/llm-service
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./backend/llm-service:/app
+    ports:
+      - "8005:8005"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DEBUG=true
+      - OPENAI_API_KEY=your_development_openai_key
+      - ANTHROPIC_API_KEY=your_development_anthropic_key
+      - REDIS_URL=redis://redis:6379/5
+    depends_on:
+      - redis
+
+  # PostgreSQLデータベース
+  db:
+    image: postgres:15
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=rag_db
+
+  # Redis
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  # Elasticsearch
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.10.4
+    ports:
+      - "9200:9200"
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+
+volumes:
+  postgres_data:
+  redis_data:
+  elasticsearch_data:
